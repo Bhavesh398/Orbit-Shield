@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/three.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="Orbit Shield - Real-time satellite tracking and collision risk monitoring system with 3D visualization, AI-powered collision prediction, and intelligent chatbot assistance." />
+    <meta name="keywords" content="satellite tracking, space traffic management, collision detection, AI, 3D visualization, orbital mechanics" />
+    <meta name="author" content="Orbit Shield Team" />
+    
+    <!-- Open Graph / Social Media Meta Tags -->
+    <meta property="og:title" content="Orbit Shield - Space Traffic Management System" />
+    <meta property="og:description" content="Comprehensive real-time satellite tracking with AI-powered collision detection, 3D visualization, and intelligent chatbot assistance." />
+    <meta property="og:type" content="website" />
+    
+    <title>Orbit Shield - Space Traffic Management System</title>
+    
+    <style>
+      /* Preload styling */
+      #loading-screen {
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background: linear-gradient(135deg, #0a0e27 0%, #1a1f3a 100%);
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        align-items: center;
+        z-index: 9999;
+        transition: opacity 0.5s ease-out;
+      }
+      
+      #loading-screen.hidden {
+        opacity: 0;
+        pointer-events: none;
+      }
+      
+      .loader {
+        width: 60px;
+        height: 60px;
+        border: 4px solid rgba(255, 255, 255, 0.1);
+        border-top: 4px solid #00d4ff;
+        border-radius: 50%;
+        animation: spin 1s linear infinite;
+      }
+      
+      @keyframes spin {
+        0% { transform: rotate(0deg); }
+        100% { transform: rotate(360deg); }
+      }
+      
+      .loading-text {
+        color: #00d4ff;
+        font-family: 'Courier New', monospace;
+        font-size: 18px;
+        margin-top: 20px;
+        letter-spacing: 2px;
+      }
+      
+      .feature-list {
+        color: rgba(255, 255, 255, 0.7);
+        font-family: 'Arial', sans-serif;
+        font-size: 14px;
+        margin-top: 30px;
+        text-align: center;
+        max-width: 600px;
+        line-height: 1.8;
+      }
+      
+      .feature-item {
+        display: inline-block;
+        margin: 5px 10px;
+        padding: 5px 12px;
+        background: rgba(0, 212, 255, 0.1);
+        border-radius: 15px;
+        border: 1px solid rgba(0, 212, 255, 0.3);
+      }
+    </style>
+  </head>
+  <body>
+    <!-- Loading Screen -->
+    <div id="loading-screen">
+      <div class="loader"></div>
+      <div class="loading-text">INITIALIZING ORBIT SHIELD</div>
+      <div class="feature-list">
+        <span class="feature-item">🛰️ 3D Satellite Tracking</span>
+        <span class="feature-item">🤖 AI Collision Detection</span>
+        <span class="feature-item">💬 Intelligent Chatbot</span>
+        <span class="feature-item">📊 Risk Analytics</span>
+        <span class="feature-item">🚨 Real-Time Alerts</span>
+        <span class="feature-item">🎯 Maneuver Planning</span>
+        <span class="feature-item">🌍 Interactive 3D Globe</span>
+        <span class="feature-item">⚡ Live Data Updates</span>
+      </div>
+    </div>
+    
+    <!-- Main Application -->
+    <div id="root"></div>
+    
+    <script type="module" src="/src/main.jsx"></script>
+    
+    <script>
+      // Hide loading screen after app loads
+      window.addEventListener('load', () => {
+        setTimeout(() => {
+          const loadingScreen = document.getElementById('loading-screen');
+          if (loadingScreen) {
+            loadingScreen.classList.add('hidden');
+            setTimeout(() => {
+              loadingScreen.style.display = 'none';
+            }, 500);
+          }
+        }, 1500);
+      });
+    </script>
+  </body>
+</html>
