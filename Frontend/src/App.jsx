@@ -6,6 +6,7 @@ import Nebula from "./Nebula";
 import Starfield from "./Starfield";
 import EarthMaterial from "./EarthMaterial";
 import AtmosphereMesh from "./AtmosphereMesh";
+import Earth from './Earth';
 import Header from "./Header";
 import SatelliteList from "./SatelliteList";
 import AlertPanel from "./AlertPanel";
@@ -17,23 +18,7 @@ import { fetchSatellites, fetchSatelliteContext, fetchDebris } from './api/clien
 
 const sunDirection = new THREE.Vector3(-2, 0.5, 1.5);
 
-function Earth() {
-  const ref = React.useRef();
-  
-  useFrame(() => {
-    ref.current.rotation.y += 0.001;
-  });
-  const axialTilt = 23.4 * Math.PI / 180;
-  return (
-    <group rotation-z={axialTilt}>
-      <mesh ref={ref}>
-        <icosahedronGeometry args={[2, 64]} />
-        <EarthMaterial sunDirection={sunDirection}/>
-        <AtmosphereMesh />
-      </mesh>
-    </group>
-  );
-}
+// Use shared Earth component (real sidereal rotation)
 
 function App() {
   const { x, y, z } = sunDirection;
@@ -56,7 +41,13 @@ function App() {
       wsRef.current.close();
       wsRef.current = null;
     }
-    const url = (window.location.protocol === 'https:' ? 'wss://' : 'ws://') + window.location.host.replace(/:\d+$/, ':8000') + '/api/ws/risks';
+    // Robust WebSocket URL construction:
+    // Prefer explicit backend WS base via env, else derive from current host replacing Vite dev port with backend port 8000.
+    const backendPort = import.meta.env.VITE_BACKEND_PORT || '8000';
+    const protocol = window.location.protocol === 'https:' ? 'wss://' : 'ws://';
+    const hostBase = window.location.hostname + ':' + backendPort;
+    const url = protocol + hostBase + '/api/ws/risks';
+    console.log('Connecting Risk WebSocket ->', url);
     try {
       const ws = new WebSocket(url);
       wsRef.current = ws;
@@ -108,6 +99,7 @@ function App() {
     ])
       .then(([satsData, debrisData]) => {
         if(mounted) {
+          console.log(`✅ Loaded ${satsData.length} satellites and ${debrisData.length} debris`);
           setSatellites(satsData);
           setAllDebris(debrisData);
         }
@@ -149,6 +141,7 @@ function App() {
   return (
     <div className="app-container">
       <Header />
+      {/* Earth rotates at realistic sidereal rate via shared component */}
       
       <div className="main-content">
         <div className="left-panel">

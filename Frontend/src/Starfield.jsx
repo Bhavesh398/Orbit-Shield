@@ -49,7 +49,7 @@ function getPoints({ numStars = 500 } = {}) {
   });
   const points = new THREE.Points(geo, mat);
   function update(t) {
-      points.rotation.y -= 0.0002;
+      // Keep starfield static (no automatic rotation)
       let col;
       const colors = [];
       for (let i = 0; i < numStars; i += 1) {

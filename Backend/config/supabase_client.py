@@ -52,12 +52,12 @@ class SupabaseClient:
     
     async def select(self, table: str, filters: Optional[Dict] = None, limit: Optional[int] = None, columns: Optional[str] = None) -> List[Dict]:
         """
-        Select records from table
+        Select records from table with automatic pagination for unlimited queries
         
         Args:
             table: Table name
             filters: Dict of column: value filters
-            limit: Maximum number of records
+            limit: Maximum number of records (None = fetch all via pagination)
             
         Returns:
             List of records
@@ -65,28 +65,66 @@ class SupabaseClient:
         start = time.time()
         try:
             select_cols = columns if columns else "*"
-            query = self.client.table(table).select(select_cols)
             
-            if filters:
-                for key, value in filters.items():
-                    query = query.eq(key, value)
-            
-            if limit:
-                query = query.limit(limit)
+            # If limit is None, use pagination to fetch ALL records
+            if limit is None:
+                # Full pagination: continue until a short page returned.
+                all_data: List[Dict] = []
+                page_size = 1000  # Supabase hard cap per request
+                start_idx = 0
+                safety_cap = 50000  # absolute hard stop to avoid runaway
+                page_num = 1
+                print(f"🔄 Starting pagination for table={table}")
+                while start_idx < safety_cap:
+                    end_idx = start_idx + page_size - 1
+                    query = self.client.table(table).select(select_cols).range(start_idx, end_idx)
+                    if filters:
+                        for key, value in filters.items():
+                            query = query.eq(key, value)
+                    response = query.execute()
+                    batch = response.data or []
+                    batch_len = len(batch)
+                    if batch_len == 0:
+                        print(f"✅ Pagination complete - empty batch at start={start_idx}")
+                        break
+                    all_data.extend(batch)
+                    print(f"📄 Page {page_num}: fetched {batch_len}, total={len(all_data)}")
+                    # Supabase returns max 999 per page (not 1000). Continue if we got exactly 999.
+                    if batch_len < 999:
+                        print(f"✅ Pagination complete - last page had {batch_len} records")
+                        break
+                    start_idx += batch_len  # Use actual batch length, not page_size
+                    page_num += 1
+                took_ms = int((time.time() - start) * 1000)
+                print(f"✅ Final count: {len(all_data)} records in {took_ms}ms")
+                logger.info(f"Supabase select paginated complete table={table} final_count={len(all_data)} cols={select_cols} ({took_ms}ms)")
+                return all_data
+            else:
+                # Regular query with limit
+                query = self.client.table(table).select(select_cols)
                 
-            response = query.execute()
-            took_ms = int((time.time() - start) * 1000)
-            if not response.data:
-                logger.warning(f"Supabase select returned empty set table={table} cols={select_cols} filters={filters} limit={limit} ({took_ms}ms)")
-                return []
-            logger.info(f"Supabase select ok table={table} count={len(response.data)} cols={select_cols} ({took_ms}ms)")
-            return response.data
+                if filters:
+                    for key, value in filters.items():
+                        query = query.eq(key, value)
+                
+                query = query.limit(limit)
+                response = query.execute()
+                took_ms = int((time.time() - start) * 1000)
+                
+                if not response.data:
+                    logger.warning(f"Supabase select returned empty set table={table} cols={select_cols} filters={filters} limit={limit} ({took_ms}ms)")
+                    return []
+                    
+                logger.info(f"Supabase select ok table={table} count={len(response.data)} cols={select_cols} ({took_ms}ms)")
+                return response.data
             
         except SupabaseUnavailable:
             # Fallback to local cache
+            print(f"⚠️ Supabase unavailable, falling back to cache")
             return local_cache.get_all(table, limit=limit or 100)
         except Exception as e:
             took_ms = int((time.time() - start) * 1000)
+            print(f"❌ Supabase error: {type(e).__name__}: {e}")
             logger.error(f"Supabase select error table={table} cols={columns or '*'} filters={filters} limit={limit} ({took_ms}ms): {e}. Falling back to cache")
             return local_cache.get_all(table, limit=limit or 100)
     

@@ -24,12 +24,13 @@ function SatelliteSprite({ sat, color = '#00d9ff', selected, onSelect, glow = fa
   return (
     <group>
       <mesh ref={ref} onClick={(e)=>{ e.stopPropagation(); onSelect && onSelect(sat); }}>
-        <sphereGeometry args={[selected ? 0.06 : 0.04, 16, 16]} />
+        {/* Reduced marker size to avoid visual Earth coverage */}
+        <sphereGeometry args={[selected ? 0.035 : 0.02, 16, 16]} />
         <meshStandardMaterial emissive={selected ? '#ff6b35' : color} color={selected ? '#ff6b35' : color} />
       </mesh>
       {glow && (
         <mesh position={pos}>
-          <sphereGeometry args={[0.09, 16, 16]} />
+          <sphereGeometry args={[0.055, 16, 16]} />
           <meshBasicMaterial color={'#ff0066'} transparent opacity={0.35} />
         </mesh>
       )}
@@ -37,14 +38,15 @@ function SatelliteSprite({ sat, color = '#00d9ff', selected, onSelect, glow = fa
   );
 }
 
-function DebrisSprite({ debris }) {
+function DebrisSprite({ debris, color = '#ff0000', size = 0.018 }) {
   const ref = useRef();
   const pos = useMemo(() => latLonAltToVector(debris.latitude || 0, debris.longitude || 0, debris.altitude_km || debris.altitude || 0), [debris.latitude, debris.longitude, debris.altitude_km, debris.altitude]);
   useEffect(() => { if (ref.current) ref.current.position.copy(pos); }, [pos]);
   return (
     <mesh ref={ref}>
-      <sphereGeometry args={[0.035, 12, 12]} />
-      <meshStandardMaterial emissive={'#ff0000'} color={'#ff0000'} />
+      {/* Debris marker */}
+      <sphereGeometry args={[size, 12, 12]} />
+      <meshStandardMaterial emissive={color} color={color} />
     </mesh>
   );
 }
@@ -63,14 +65,26 @@ function SatelliteOrbit({ satellites = [], selectedSatellite, debrisList = [], a
   const visibleDebris = (focusMode && selectedSatellite) ? debrisList : allDebris;
 
   // Use instanced mesh when not in focus mode and large satellite count
-  const useInstanced = !(focusMode && selectedSatellite) && visibleSatellites.length > 500;
+  // Lowered threshold from 500 to 50 to ensure efficient rendering for all satellites
+  const useInstanced = !(focusMode && selectedSatellite) && visibleSatellites.length > 50;
   const instancedRef = useRef();
+
+  // For very large counts, limit rendering to prevent GPU crashes
+  const renderLimit = 10000;
+  const satellitesToRender = useInstanced && visibleSatellites.length > renderLimit 
+    ? visibleSatellites.slice(0, renderLimit)
+    : visibleSatellites;
+
+  // Log satellite count for debugging
+  useEffect(() => {
+    console.log(`🛰️ Rendering ${satellitesToRender.length} satellites (instanced: ${useInstanced}) ${visibleSatellites.length > renderLimit ? `[Limited from ${visibleSatellites.length}]` : ''}`);
+  }, [satellitesToRender.length, useInstanced, visibleSatellites.length, renderLimit]);
 
   useEffect(() => {
     if (!useInstanced || !instancedRef.current) return;
     const mesh = instancedRef.current;
     const dummy = new THREE.Object3D();
-    visibleSatellites.forEach((sat, i) => {
+    satellitesToRender.forEach((sat, i) => {
       const pos = latLonAltToVector(sat.latitude || 0, sat.longitude || 0, sat.altitude_km || 0);
       dummy.position.copy(pos);
       dummy.updateMatrix();
@@ -78,7 +92,7 @@ function SatelliteOrbit({ satellites = [], selectedSatellite, debrisList = [], a
       // Color risk highlight if available (store in instance color attribute if extended later)
     });
     mesh.instanceMatrix.needsUpdate = true;
-  }, [useInstanced, visibleSatellites]);
+  }, [useInstanced, satellitesToRender]);
 
   // Recompute end position when selection changes
   useEffect(() => {
@@ -128,17 +142,18 @@ function SatelliteOrbit({ satellites = [], selectedSatellite, debrisList = [], a
     <group>
       {/* Instanced rendering for large sets */}
       {useInstanced && (
-        <instancedMesh ref={instancedRef} args={[null, null, visibleSatellites.length]}
+        <instancedMesh ref={instancedRef} args={[null, null, satellitesToRender.length]}
           onClick={(e) => {
             const idx = e.instanceId;
-            const sat = visibleSatellites[idx];
+            const sat = satellitesToRender[idx];
             sat && onSelectSatellite && onSelectSatellite(sat);
           }}>
-          <sphereGeometry args={[0.04, 12, 12]} />
+          {/* Reduced instanced satellite marker size */}
+          <sphereGeometry args={[0.02, 12, 12]} />
           <meshStandardMaterial emissive={'#00d9ff'} color={'#00d9ff'} />
         </instancedMesh>
       )}
-      {!useInstanced && visibleSatellites.map(sat => {
+      {!useInstanced && satellitesToRender.map(sat => {
         const isSelected = selectedSatellite?.id === sat.id;
         const riskProb = analysis?.nearest?.[0]?.model1_risk?.probability;
         const glow = isSelected && riskProb != null && riskProb > 0.5;
@@ -146,8 +161,14 @@ function SatelliteOrbit({ satellites = [], selectedSatellite, debrisList = [], a
           <SatelliteSprite key={sat.id} sat={sat} selected={isSelected} onSelect={onSelectSatellite} glow={glow} />
         );
       })}
+      {/* Base debris set (all or per focus) */}
       {visibleDebris.map(d => (
-        <DebrisSprite key={d.id} debris={d} />
+        <DebrisSprite key={`deb-${d.id}`} debris={d} />
+      ))}
+
+      {/* Always overlay nearest debris to selected satellite (distinct color) */}
+      {selectedSatellite && (debrisList || []).map((d, idx) => (
+        <DebrisSprite key={`near-${d.id || idx}`} debris={d} color="#ff00ff" size={0.026} />
       ))}
       {selectedSatellite && (
         <line ref={trailRef}>

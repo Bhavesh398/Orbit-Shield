@@ -6,6 +6,7 @@ from typing import Optional, List, Dict
 from datetime import datetime
 from config.supabase_client import supabase_client
 from config.local_cache import local_cache
+from config.cache_manager import cache_manager
 from config.sql_loader import load_debris_from_sql
 import uuid
 import random
@@ -17,27 +18,37 @@ class DebrisService:
     TABLE_NAME = "debris"
     
     async def get_all_debris(self, limit: Optional[int] = 100) -> List[Dict]:
-        """Get all debris from Supabase"""
+        """Get all debris from Supabase or cache"""
         import logging
         logger = logging.getLogger(__name__)
-        logger.info(f"Fetching debris from Supabase with limit={limit}")
+        logger.info(f"Fetching debris with limit={limit}")
         
-        # Request only necessary columns to mitigate PostgREST JSON generation errors
-        debris_list = await supabase_client.select(
-            self.TABLE_NAME,
-            limit=limit,
-            columns="id,deb_x,deb_y,deb_z,deb_vx,deb_vy,deb_vz,altitude,size_estimate,mass_estimate,source,status"
-        )
-        logger.info(f"Retrieved {len(debris_list)} debris from Supabase")
+        try:
+            # Request only necessary columns to mitigate PostgREST JSON generation errors
+            debris_list = await supabase_client.select(
+                self.TABLE_NAME,
+                limit=limit,
+                columns="id,deb_id,deb_name,deb_x,deb_y,deb_z,deb_vx,deb_vy,deb_vz,altitude,size_estimate,mass_estimate,source,status"
+            )
+            logger.info(f"Retrieved {len(debris_list)} debris from Supabase")
+            
+            # Cache data if we fetched all records
+            if debris_list and limit is None:
+                cache_manager.save_to_cache(self.TABLE_NAME, debris_list)
+                logger.info(f"💾 Cached {len(debris_list)} debris")
+                
+        except Exception as e:
+            logger.warning(f"⚠️ Supabase unavailable: {e}. Loading from cache...")
+            debris_list = cache_manager.load_from_cache(self.TABLE_NAME) or []
+            logger.info(f"Retrieved {len(debris_list)} debris from cache")
 
-        # Fallback to file loader if empty
+        # Fallback to file loader if still empty
         if not debris_list:
-            logger.warning("No debris found in Supabase – attempting local file load fallback")
+            logger.warning("No debris found in Supabase or cache – attempting local file load fallback")
             file_debris = load_debris_from_sql()
             if file_debris:
                 logger.info(f"Loaded {len(file_debris)} debris from local files; seeding cache")
                 for d in file_debris:
-                    # ensure id exists
                     if not d.get('id'):
                         d['id'] = str(uuid.uuid4())
                     local_cache.upsert(self.TABLE_NAME, d)

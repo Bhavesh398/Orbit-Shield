@@ -39,34 +39,53 @@ function SatelliteDetailPanel({ satellite, analysis, onClose, focusMode, onToggl
 
   function handleSimulateCollision() {
     if (!satellite) return;
-    // Use DUMMY data for simulator but keep real satellite name/ID
-    const dummySatellite = {
+    // Use real satellite data
+    const realSatellite = {
       id: satellite.id || satellite.norad_id || 'SAT-001',
       name: satellite.name || satellite.sat_name || satellite.norad_id || 'Unknown Satellite',
       norad_id: satellite.norad_id || satellite.id,
-      latitude: 10,
-      longitude: 45,
-      altitude_km: 550
+      latitude: satellite.latitude ?? satellite.lat ?? 0,
+      longitude: satellite.longitude ?? satellite.lon ?? 0,
+      altitude_km: satellite.altitude_km ?? satellite.alt ?? 500,
+      sat_x: satellite.sat_x,
+      sat_y: satellite.sat_y,
+      sat_z: satellite.sat_z
     };
-    const dummyDebris = {
+    
+    // Get top 3 nearest debris from analysis
+    const top3Debris = analysis?.nearest?.slice(0, 3).map(n => ({
+      id: n.debris?.deb_id || n.debris?.id || 'DEBRIS-UNKNOWN',
+      name: n.debris?.deb_name || n.debris?.name || 'Unknown Debris',
+      latitude: n.debris?.latitude ?? n.debris?.lat ?? 0,
+      longitude: n.debris?.longitude ?? n.debris?.lon ?? 0,
+      altitude_km: n.debris?.altitude_km ?? n.debris?.alt ?? 500,
+      deb_x: n.debris?.deb_x ?? n.debris?.x,
+      deb_y: n.debris?.deb_y ?? n.debris?.y,
+      deb_z: n.debris?.deb_z ?? n.debris?.z,
+      distance_km: n.distance_now_km,
+      collision_probability: n.model1_risk?.probability
+    })) || [{
       id: 'DEBRIS-98765',
-      name: 'DEBRIS-98765',
+      name: 'Unknown Debris',
       latitude: 12,
       longitude: 50,
       altitude_km: 530
-    };
+    }];
     
-    sessionStorage.setItem('collisionSatellite', JSON.stringify(dummySatellite));
-    sessionStorage.setItem('collisionDebris', JSON.stringify(dummyDebris));
-    sessionStorage.setItem('collisionProbability', JSON.stringify(0.87));
-    sessionStorage.setItem('collisionDistance', JSON.stringify(15));
+    const collisionProb = nearest?.model1_risk?.probability ?? 0.87;
+    const collisionDist = nearest?.distance_now_km ?? 15;
+    
+    sessionStorage.setItem('collisionSatellite', JSON.stringify(realSatellite));
+    sessionStorage.setItem('collisionDebrisList', JSON.stringify(top3Debris));
+    sessionStorage.setItem('collisionProbability', JSON.stringify(collisionProb));
+    sessionStorage.setItem('collisionDistance', JSON.stringify(collisionDist));
 
     navigate('/collision-simulator', {
       state: {
-        satellite: dummySatellite,
-        debris: dummyDebris,
-        collisionProbability: 0.87,
-        distance: 15
+        satellite: realSatellite,
+        debrisList: top3Debris,
+        collisionProbability: collisionProb,
+        distance: collisionDist
       }
     });
   }

@@ -1,31 +1,17 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Canvas, useFrame } from '@react-three/fiber';
+import { Canvas } from '@react-three/fiber';
 import { OrbitControls, Line } from '@react-three/drei';
 import * as THREE from 'three';
 import EarthMaterial from './EarthMaterial';
 import AtmosphereMesh from './AtmosphereMesh';
+import Earth from './Earth';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { planManeuver, simulateManeuver } from './api/client';
 
 const sunDirection = new THREE.Vector3(-2, 0.5, 1.5);
 
 // Earth component
-function Earth() {
-  const ref = useRef();
-  useFrame(() => {
-    if (ref.current) ref.current.rotation.y += 0.001;
-  });
-  const axialTilt = 23.4 * Math.PI / 180;
-  return (
-    <group rotation-z={axialTilt}>
-      <mesh ref={ref}>
-        <icosahedronGeometry args={[2, 64]} />
-        <EarthMaterial sunDirection={sunDirection} />
-        <AtmosphereMesh />
-      </mesh>
-    </group>
-  );
-}
+// Use shared Earth component (real sidereal rotation)
 
 // Convert lat/lon/alt to 3D position
 function latLonAltToVector(lat, lon, altKm, earthRadiusScene = 2) {
@@ -91,25 +77,66 @@ function CollisionZone({ position, radius = 0.15 }) {
   );
 }
 
-// Generate circular orbit trajectory
+// Generate proper 3D orbital trajectory around Earth
 function generateOrbitPath(lat, lon, alt, numPoints = 100) {
   const points = [];
+  const rEarthKm = 6371.0;
+  const earthRadiusScene = 2;
+  const scale = earthRadiusScene / rEarthKm;
+  const orbitRadius = (rEarthKm + alt) * scale;
+  
+  // Convert initial position to orbital plane
+  const latR = lat * Math.PI / 180;
+  const lonR = lon * Math.PI / 180;
+  
+  // Calculate orbital inclination (angle of orbit relative to equator)
+  const inclination = latR; // Orbit inclination matches initial latitude
+  
   for (let i = 0; i < numPoints; i++) {
-    const angle = (i / numPoints) * Math.PI * 2;
-    const adjustedLon = lon + (angle * 180 / Math.PI);
-    points.push(latLonAltToVector(lat, adjustedLon, alt));
+    const theta = (i / numPoints) * Math.PI * 2; // Angle around orbit
+    
+    // Position in orbital plane (2D)
+    const xOrbit = orbitRadius * Math.cos(theta);
+    const yOrbit = orbitRadius * Math.sin(theta);
+    
+    // Rotate by inclination to create 3D orbit
+    const x = xOrbit * Math.cos(lonR) - yOrbit * Math.sin(lonR) * Math.cos(inclination);
+    const y = yOrbit * Math.sin(inclination);
+    const z = xOrbit * Math.sin(lonR) + yOrbit * Math.cos(lonR) * Math.cos(inclination);
+    
+    points.push(new THREE.Vector3(x, y, z));
   }
   return points;
 }
 
-// Generate debris trajectory (slightly offset orbit)
+// Generate debris trajectory (slightly offset orbit with perturbations)
 function generateDebrisPath(lat, lon, alt, numPoints = 100) {
   const points = [];
+  const rEarthKm = 6371.0;
+  const earthRadiusScene = 2;
+  const scale = earthRadiusScene / rEarthKm;
+  const orbitRadius = (rEarthKm + alt) * scale;
+  
+  // Offset debris orbit slightly
+  const latR = (lat + 2) * Math.PI / 180; // 2 degree offset
+  const lonR = (lon + 5) * Math.PI / 180; // 5 degree offset
+  const inclination = latR;
+  
   for (let i = 0; i < numPoints; i++) {
-    const angle = (i / numPoints) * Math.PI * 2;
-    const adjustedLon = lon + (angle * 180 / Math.PI) + 5; // offset
-    const adjustedLat = lat + Math.sin(angle * 3) * 2; // wobble
-    points.push(latLonAltToVector(adjustedLat, adjustedLon, alt - 20));
+    const theta = (i / numPoints) * Math.PI * 2;
+    
+    // Add perturbations to simulate irregular debris orbit
+    const perturbation = 0.02 * Math.sin(theta * 3); // Small wobble
+    const r = orbitRadius * (1 + perturbation);
+    
+    const xOrbit = r * Math.cos(theta);
+    const yOrbit = r * Math.sin(theta);
+    
+    const x = xOrbit * Math.cos(lonR) - yOrbit * Math.sin(lonR) * Math.cos(inclination);
+    const y = yOrbit * Math.sin(inclination);
+    const z = xOrbit * Math.sin(lonR) + yOrbit * Math.cos(lonR) * Math.cos(inclination);
+    
+    points.push(new THREE.Vector3(x, y, z));
   }
   return points;
 }
@@ -144,9 +171,9 @@ function CollisionSimulator() {
   
   const location = useLocation();
 
-  // Satellite / debris come from selection (location.state) or sessionStorage, fallback to dummy
+  // Satellite / debris come from selection (location.state) or sessionStorage
   const [satellite, setSatellite] = useState(null);
-  const [debris, setDebris] = useState(null);
+  const [debrisList, setDebrisList] = useState([]);
   const [loadedCollisionProb, setLoadedCollisionProb] = useState(null);
   const [loadedDistance, setLoadedDistance] = useState(null);
   
@@ -154,73 +181,55 @@ function CollisionSimulator() {
   const [maneuverPlan, setManeuverPlan] = useState(null);
   const [simResult, setSimResult] = useState(null);
   
-  // Populate satellite/debris from incoming state or session (DUMMY DATA ONLY)
+  // Populate satellite/debris from incoming state or session (REAL DATA)
   useEffect(() => {
     const satFromState = location.state?.satellite;
-    const debrisFromState = location.state?.debris;
+    const debrisListFromState = location.state?.debrisList;
     const probFromState = location.state?.collisionProbability;
     const distFromState = location.state?.distance;
 
-    // Always use dummy data, just keep the real name if provided
+    // Use real data from state
     if (satFromState) {
-      const dummySat = {
-        id: satFromState.id || satFromState.norad_id || 'SAT-001',
-        name: satFromState.name || satFromState.sat_name || satFromState.norad_id || 'Demo Satellite',
-        norad_id: satFromState.norad_id || satFromState.id || 'NORAD-001',
-        latitude: 10,
-        longitude: 45,
-        altitude_km: 550
-      };
-      const dummyDebris = {
-        id: 'DEBRIS-98765',
-        name: 'Space Debris Fragment',
-        latitude: 12,
-        longitude: 50,
-        altitude_km: 530
-      };
+      console.log('🎬 CollisionSimulator loaded with real satellite data:', satFromState.name);
+      console.log('  Satellite position:', { lat: satFromState.latitude, lon: satFromState.longitude, alt: satFromState.altitude_km });
+      console.log('  Debris count:', debrisListFromState?.length || 0);
       
-      console.log('🎬 CollisionSimulator loaded with dummy data for satellite:', dummySat.name);
-      setSatellite(dummySat);
-      setDebris(dummyDebris);
-      setLoadedCollisionProb(0.87);
-      setLoadedDistance(15);
+      setSatellite(satFromState);
+      setDebrisList(debrisListFromState || []);
+      setLoadedCollisionProb(probFromState ?? 0.5);
+      setLoadedDistance(distFromState ?? 10);
     } else {
       // fallback to sessionStorage
       const storedSat = sessionStorage.getItem('collisionSatellite');
-      const storedDebris = sessionStorage.getItem('collisionDebris');
+      const storedDebrisList = sessionStorage.getItem('collisionDebrisList');
       const storedProb = sessionStorage.getItem('collisionProbability');
       const storedDist = sessionStorage.getItem('collisionDistance');
       
       if (storedSat) {
         try {
           const sat = JSON.parse(storedSat);
-          const dummySat = {
-            id: sat.id || sat.norad_id || 'SAT-001',
-            name: sat.name || sat.sat_name || sat.norad_id || 'Demo Satellite',
-            norad_id: sat.norad_id || sat.id || 'NORAD-001',
-            latitude: 10,
-            longitude: 45,
-            altitude_km: 550
-          };
-          setSatellite(dummySat);
-          console.log('🎬 CollisionSimulator loaded from session for satellite:', dummySat.name);
+          setSatellite(sat);
+          console.log('🎬 CollisionSimulator loaded real data from session for satellite:', sat.name);
+          console.log('  Position:', { lat: sat.latitude, lon: sat.longitude, alt: sat.altitude_km });
           
-          if (storedDebris) {
-            setDebris(JSON.parse(storedDebris));
+          if (storedDebrisList) {
+            const debList = JSON.parse(storedDebrisList);
+            setDebrisList(debList);
+            console.log('  Debris count:', debList.length);
           } else {
-            setDebris({ id: 'DEBRIS-98765', name: 'Space Debris Fragment', latitude: 12, longitude: 50, altitude_km: 530 });
+            setDebrisList([]);
           }
           
           if (storedProb) setLoadedCollisionProb(JSON.parse(storedProb));
-          else setLoadedCollisionProb(0.87);
+          else setLoadedCollisionProb(0.5);
           
           if (storedDist) setLoadedDistance(JSON.parse(storedDist));
-          else setLoadedDistance(15);
+          else setLoadedDistance(10);
         } catch (e) {
           console.error('Error parsing session storage:', e);
           // Use complete fallback
           setSatellite({ id: 'NORAD-12345', name: 'Demo Satellite', norad_id: 'NORAD-12345', latitude: 10, longitude: 45, altitude_km: 550 });
-          setDebris({ id: 'DEBRIS-98765', name: 'Space Debris Fragment', latitude: 12, longitude: 50, altitude_km: 530 });
+          setDebrisList([]);
           setLoadedCollisionProb(0.87);
           setLoadedDistance(15);
         }
@@ -228,7 +237,7 @@ function CollisionSimulator() {
         // final fallback dummy
         const dummySat = { id: 'NORAD-12345', name: 'Demo Satellite', norad_id: 'NORAD-12345', latitude: 10, longitude: 45, altitude_km: 550 };
         setSatellite(dummySat);
-        setDebris({ id: 'DEBRIS-98765', name: 'Space Debris Fragment', latitude: 12, longitude: 50, altitude_km: 530 });
+        setDebrisList([]);
         setLoadedCollisionProb(0.87);
         setLoadedDistance(15);
         console.log('🎬 CollisionSimulator using fallback dummy data');
@@ -236,22 +245,44 @@ function CollisionSimulator() {
     }
   }, [location]);
 
-  // Generate trajectories using current satellite/debris - always compute even if loading
+  // Generate satellite trajectory
   const satLat = satellite?.latitude ?? satellite?.lat ?? 0;
   const satLon = satellite?.longitude ?? satellite?.lon ?? 0;
   const satAlt = satellite?.altitude_km ?? satellite?.alt ?? 500;
-  const debLat = debris?.latitude ?? debris?.lat ?? 0;
-  const debLon = debris?.longitude ?? debris?.lon ?? 0;
-  const debAlt = debris?.altitude_km ?? debris?.alt ?? (satAlt - 20);
 
   const satTrajectory = React.useMemo(() => generateOrbitPath(satLat, satLon, satAlt), [satLat, satLon, satAlt]);
-  const debrisTrajectory = React.useMemo(() => generateDebrisPath(debLat, debLon, debAlt), [debLat, debLon, debAlt]);
   
-  // Find collision point
-  const collisionData = React.useMemo(() => findClosestApproach(satTrajectory, debrisTrajectory), [satTrajectory, debrisTrajectory]);
+  // Generate trajectories for all debris
+  const debrisTrajectories = React.useMemo(() => {
+    return debrisList.map(deb => {
+      const debLat = deb?.latitude ?? deb?.lat ?? 0;
+      const debLon = deb?.longitude ?? deb?.lon ?? 0;
+      const debAlt = deb?.altitude_km ?? deb?.alt ?? (satAlt - 20);
+      return {
+        debris: deb,
+        trajectory: generateDebrisPath(debLat, debLon, debAlt)
+      };
+    });
+  }, [debrisList, satAlt]);
   
-  // AI Predictions (driven by fetched/loaded data) - initialize after collisionData
-  const initialClosestApproach = loadedDistance ?? (collisionData?.distance ? (collisionData.distance * 6371 / 2).toFixed(2) : '15');
+  // Find closest approach for each debris
+  const collisionDataList = React.useMemo(() => {
+    return debrisTrajectories.map(({ debris, trajectory }) => ({
+      debris,
+      ...findClosestApproach(satTrajectory, trajectory)
+    }));
+  }, [satTrajectory, debrisTrajectories]);
+  
+  // Get the most dangerous collision (shortest distance)
+  const primaryCollision = React.useMemo(() => {
+    if (collisionDataList.length === 0) return null;
+    return collisionDataList.reduce((min, curr) => 
+      curr.distance < min.distance ? curr : min
+    );
+  }, [collisionDataList]);
+  
+  // AI Predictions (driven by fetched/loaded data) - initialize after primaryCollision
+  const initialClosestApproach = loadedDistance ?? (primaryCollision?.distance ? (primaryCollision.distance * 6371 / 2).toFixed(2) : '15');
   const [predictions, setPredictions] = useState({
     collisionProbability: loadedCollisionProb ?? 0.87,
     timeToCollision: 145, // seconds
@@ -325,45 +356,100 @@ function CollisionSimulator() {
   };
 
   async function handlePlanFromSimulator() {
-    // Generate dummy maneuver plan (no API call)
-    const dummyPlan = {
-      delta_v_mps: 12.5,
-      direction: 'prograde',
-      burn_duration_s: 8.2,
-      fuel_cost_kg: 3.2,
-      safety_margin_km: 25,
-      confidence: 0.95,
-      direction_vector: { x: 0, y: 1, z: 0 }
-    };
-    setManeuverPlan(dummyPlan);
-    setSimResult(null);
-    console.log('🎬 Generated dummy maneuver plan:', dummyPlan);
+    try {
+      console.log('🚀 Planning maneuver with real API...');
+      const result = await planManeuver({
+        satellite_id: satellite.id,
+        debris_id: debris.id,
+        collision_prob: predictions.collisionProbability
+      });
+      
+      if (result && result.maneuver) {
+        setManeuverPlan(result.maneuver);
+        setSimResult(null);
+        console.log('✅ Real maneuver plan received:', result.maneuver);
+      } else {
+        console.warn('⚠️ API returned no maneuver, using fallback');
+        // Fallback if API fails
+        const fallbackPlan = {
+          delta_v_mps: 12.5,
+          direction: 'prograde',
+          burn_duration_s: 8.2,
+          fuel_cost_kg: 3.2,
+          safety_margin_km: 25,
+          confidence: 0.95,
+          direction_vector: { x: 0, y: 1, z: 0 }
+        };
+        setManeuverPlan(fallbackPlan);
+        setSimResult(null);
+      }
+    } catch (error) {
+      console.error('❌ Error planning maneuver:', error);
+      // Fallback on error
+      const fallbackPlan = {
+        delta_v_mps: 12.5,
+        direction: 'prograde',
+        burn_duration_s: 8.2,
+        fuel_cost_kg: 3.2,
+        safety_margin_km: 25,
+        confidence: 0.95,
+        direction_vector: { x: 0, y: 1, z: 0 }
+      };
+      setManeuverPlan(fallbackPlan);
+      setSimResult(null);
+    }
   }
 
   async function handleSimulateFromSimulator() {
     if (!maneuverPlan) return;
-    // Generate dummy simulation result (no API call)
-    const dummySim = {
-      predicted_miss_distance_km: 42.5,
-      risk_reduction_prob: 0.89,
-      residual_probability: 0.01,
-      new_altitude_km: (satellite?.altitude_km || 550) + 25,
-      status: 'safe'
-    };
-    setSimResult(dummySim);
-    console.log('🎬 Generated dummy simulation result:', dummySim);
+    try {
+      console.log('🚀 Simulating maneuver with real API...');
+      const result = await simulateManeuver({
+        satellite_id: satellite.id,
+        maneuver: maneuverPlan
+      });
+      
+      if (result && result.simulation) {
+        setSimResult(result.simulation);
+        console.log('✅ Real simulation result received:', result.simulation);
+      } else {
+        console.warn('⚠️ API returned no simulation, using fallback');
+        // Fallback if API fails
+        const fallbackSim = {
+          predicted_miss_distance_km: 42.5,
+          risk_reduction_prob: 0.89,
+          residual_probability: 0.01,
+          new_altitude_km: (satellite?.altitude_km || 550) + 25,
+          status: 'safe'
+        };
+        setSimResult(fallbackSim);
+      }
+    } catch (error) {
+      console.error('❌ Error simulating maneuver:', error);
+      // Fallback on error
+      const fallbackSim = {
+        predicted_miss_distance_km: 42.5,
+        risk_reduction_prob: 0.89,
+        residual_probability: 0.01,
+        new_altitude_km: (satellite?.altitude_km || 550) + 25,
+        status: 'safe'
+      };
+      setSimResult(fallbackSim);
+    }
   }
   
   const distanceAtCurrentTime = React.useMemo(() => {
+    if (!primaryCollision || debrisTrajectories.length === 0) return null;
     const idx = Math.floor(simProgress * (satTrajectory.length - 1));
-    if (idx >= satTrajectory.length || idx >= debrisTrajectory.length) return null;
-    return satTrajectory[idx].distanceTo(debrisTrajectory[idx]) * 6371 / 2; // scale to km
-  }, [simProgress, satTrajectory, debrisTrajectory]);
+    const primaryDebrisTraj = debrisTrajectories[0]?.trajectory;
+    if (!primaryDebrisTraj || idx >= satTrajectory.length || idx >= primaryDebrisTraj.length) return null;
+    return satTrajectory[idx].distanceTo(primaryDebrisTraj[idx]) * 6371 / 2; // scale to km
+  }, [simProgress, satTrajectory, debrisTrajectories, primaryCollision]);
   
-  const isNearCollision = simProgress >= collisionData.progress - 0.05 && simProgress <= collisionData.progress + 0.05;
+  const isNearCollision = primaryCollision && simProgress >= primaryCollision.progress - 0.05 && simProgress <= primaryCollision.progress + 0.05;
 
-  // Don't render until we have valid satellite and debris data
-  if (!satellite || !debris) {
+  // Don't render until we have valid satellite data
+  if (!satellite) {
     return (
       <div style={{ width: '100vw', height: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#0a0a0f', color: '#fff' }}>
         <div style={{ textAlign: 'center' }}>
@@ -405,8 +491,20 @@ function CollisionSimulator() {
           <h3 style={{ fontSize: 13, color: '#3ABEFF', marginBottom: 10, letterSpacing: '1px' }}>Scenario Details</h3>
           <div style={{ fontSize: 11, lineHeight: 1.8 }}>
             <div><strong>Satellite:</strong> {satellite.name}</div>
-            <div><strong>Debris:</strong> {debris.name}</div>
-            <div><strong>Collision Probability:</strong> <span style={{color: '#ff4444', fontWeight: 700}}>{(predictions.collisionProbability * 100).toFixed(1)}%</span></div>
+            <div><strong>Tracking:</strong> {debrisList.length} debris object{debrisList.length !== 1 ? 's' : ''}</div>
+            {debrisList.slice(0, 3).map((deb, idx) => (
+              <div key={deb.id || idx} style={{ 
+                marginTop: 6, 
+                paddingLeft: 8, 
+                borderLeft: `2px solid ${['#ff4444', '#ff8844', '#ffaa44'][idx]}`,
+                fontSize: 10
+              }}>
+                <div><strong>#{idx + 1}:</strong> {deb.name || deb.id}</div>
+                {deb.distance_km && <div>Distance: {deb.distance_km.toFixed(2)} km</div>}
+                {deb.collision_probability && <div>Risk: {(deb.collision_probability * 100).toFixed(1)}%</div>}
+              </div>
+            ))}
+            <div style={{ marginTop: 8 }}><strong>Primary Threat Probability:</strong> <span style={{color: '#ff4444', fontWeight: 700}}>{(predictions.collisionProbability * 100).toFixed(1)}%</span></div>
             <div><strong>Time to Impact:</strong> {predictions.timeToCollision}s</div>
             <div><strong>Closest Approach:</strong> {predictions.closestApproach} km</div>
           </div>
@@ -429,18 +527,7 @@ function CollisionSimulator() {
             />
           </div>
           
-          <div style={{ marginBottom: 15 }}>
-            <label style={{ fontSize: 11, display: 'block', marginBottom: 6 }}>Speed: {speed.toFixed(1)}x</label>
-            <input 
-              type="range" 
-              min="0.5" 
-              max="3" 
-              step="0.5"
-              value={speed}
-              onChange={(e) => setSpeed(parseFloat(e.target.value))}
-              style={{ width: '100%' }}
-            />
-          </div>
+          {/* Removed interactive speed slider — timeline speed still controlled by internal state */}
           
           <div style={{ display: 'flex', gap: 10 }}>
             <button 
@@ -540,7 +627,7 @@ function CollisionSimulator() {
               </div>
               <div style={{ marginTop: 10, display: 'flex', gap: 8 }}>
                 <button
-                  onClick={() => navigate('/maneuver-planner', { state: { satellite, debris: [debris], collisionPoint: collisionData.point, collisionProbability: predictions.collisionProbability, maneuverPlan, simulation: simResult } })}
+                  onClick={() => navigate('/maneuver-planner', { state: { satellite, debris: debrisList, collisionPoint: primaryCollision?.point, collisionProbability: predictions.collisionProbability, maneuverPlan, simulation: simResult } })}
                   style={{ flex: 1, padding: 8, borderRadius: 6, background: 'transparent', border: '1px solid rgba(58,190,255,0.18)', color: '#3ABEFF', cursor: 'pointer' }}
                 >
                   Open in Maneuver Planner
@@ -558,7 +645,7 @@ function CollisionSimulator() {
               </div>
               <div style={{ marginTop: 10, display: 'flex', gap: 8 }}>
                 <button
-                  onClick={() => navigate('/maneuver-planner', { state: { satellite, debris: [debris], collisionPoint: collisionData.point, collisionProbability: predictions.collisionProbability, maneuverPlan, simulation: simResult } })}
+                  onClick={() => navigate('/maneuver-planner', { state: { satellite, debris: debrisList, collisionPoint: primaryCollision?.point, collisionProbability: predictions.collisionProbability, maneuverPlan, simulation: simResult } })}
                   style={{ flex: 1, padding: 8, borderRadius: 6, background: 'transparent', border: '1px solid rgba(16,185,129,0.12)', color: '#10b981', cursor: 'pointer' }}
                 >
                   Inspect in Planner
@@ -642,14 +729,27 @@ function CollisionSimulator() {
         <Canvas camera={{ position: [0, 2, 6] }} gl={{ toneMapping: THREE.NoToneMapping }}>
           {showEarth && <Earth />}
           <AnimatedSatellite trajectory={satTrajectory} progress={simProgress} showTrail={showTrails} />
-          <AnimatedDebris trajectory={debrisTrajectory} progress={simProgress} showTrail={showTrails} />
-          {isNearCollision && collisionData.point && (
-            <CollisionZone position={collisionData.point} />
+          
+          {/* Render all debris with different colors */}
+          {debrisTrajectories.map((debTraj, idx) => (
+            <AnimatedDebris 
+              key={debTraj.debris.id || idx}
+              trajectory={debTraj.trajectory} 
+              progress={simProgress} 
+              showTrail={showTrails}
+              color={['#ff4444', '#ff8844', '#ffaa44'][idx] || '#ff4444'}
+              size={idx === 0 ? 0.05 : 0.04}
+            />
+          ))}
+          
+          {/* Show collision zone for primary threat */}
+          {primaryCollision && isNearCollision && primaryCollision.point && (
+            <CollisionZone position={primaryCollision.point} />
           )}
 
           {/* Visualize collision probability as a translucent sphere at the CPA */}
-          {collisionData.point && (
-            <mesh position={collisionData.point}>
+          {primaryCollision?.point && (
+            <mesh position={primaryCollision.point}>
               <sphereGeometry args={[0.12 * (0.5 + predictions.collisionProbability), 16, 16]} />
               <meshBasicMaterial color="#ff4444" transparent opacity={0.18} />
             </mesh>

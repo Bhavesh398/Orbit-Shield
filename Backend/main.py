@@ -8,9 +8,12 @@ from fastapi.responses import JSONResponse
 from contextlib import asynccontextmanager
 import uvicorn
 
-from api import satellites, debris, collision_events, maneuvers, alerts, health, satellite_analysis, risk_stream, report
+from api import satellites, debris, collision_events, maneuvers, alerts, health, satellite_analysis, risk_stream, report, cache
 from config.settings import settings
+from config.cache_manager import cache_manager
+from config.supabase_client import supabase_client
 import gemini_search
+import asyncio
 
 
 @asynccontextmanager
@@ -19,6 +22,16 @@ async def lifespan(app: FastAPI):
     print("🚀 Orbit Shield Backend Starting...")
     print(f"📡 Environment: {settings.ENVIRONMENT}")
     print(f"🔧 Debug Mode: {settings.DEBUG}")
+    
+    # Sync cache from Supabase on startup
+    print("💾 Syncing cache from Supabase...")
+    try:
+        results = await cache_manager.sync_all_tables(supabase_client)
+        total = sum(results.values())
+        print(f"✅ Cache sync complete: {total} total records")
+    except Exception as e:
+        print(f"⚠️ Cache sync failed: {e}. Will use existing cache.")
+    
     yield
     print("🛑 Orbit Shield Backend Shutting Down...")
 
@@ -69,6 +82,7 @@ async def general_exception_handler(request, exc):
 
 # Include Routers
 app.include_router(health.router, prefix="/api", tags=["Health"])
+app.include_router(cache.router, prefix="/api", tags=["Cache Management"])
 app.include_router(satellites.router, prefix="/api/satellites", tags=["Satellites"])
 app.include_router(debris.router, prefix="/api/debris", tags=["Debris"])
 app.include_router(collision_events.router, prefix="/api/collision-events", tags=["Collision Events"])

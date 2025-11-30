@@ -1,27 +1,40 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Canvas, useFrame } from '@react-three/fiber';
+import { Canvas } from '@react-three/fiber';
 import { OrbitControls, Line } from '@react-three/drei';
 import * as THREE from 'three';
 import EarthMaterial from './EarthMaterial';
 import AtmosphereMesh from './AtmosphereMesh';
+import Earth from './Earth';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { planManeuver, simulateManeuver } from './api/client';
 
-// Generate orbital trajectory
+// Generate proper 3D orbital trajectory around Earth
 function generateOrbitPath(lat, lon, alt, numPoints = 100) {
   const points = [];
+  const rEarthKm = 6371.0;
+  const earthRadiusScene = 2;
+  const scale = earthRadiusScene / rEarthKm;
+  const orbitRadius = (rEarthKm + alt) * scale;
+  
+  // Convert initial position to orbital plane
+  const latR = lat * Math.PI / 180;
+  const lonR = lon * Math.PI / 180;
+  
+  // Calculate orbital inclination (angle of orbit relative to equator)
+  const inclination = latR; // Orbit inclination matches initial latitude
+  
   for (let i = 0; i < numPoints; i++) {
-    const angle = (i / numPoints) * Math.PI * 2;
-    const adjustedLon = lon + (angle * 180 / Math.PI);
-    const rEarthKm = 6371.0;
-    const rKm = rEarthKm + alt;
-    const scale = 2 / rEarthKm;
-    const r = rKm * scale;
-    const latR = lat * Math.PI / 180;
-    const lonR = adjustedLon * Math.PI / 180;
-    const x = r * Math.cos(latR) * Math.cos(lonR);
-    const y = r * Math.sin(latR);
-    const z = r * Math.cos(latR) * Math.sin(lonR);
+    const theta = (i / numPoints) * Math.PI * 2; // Angle around orbit
+    
+    // Position in orbital plane (2D)
+    const xOrbit = orbitRadius * Math.cos(theta);
+    const yOrbit = orbitRadius * Math.sin(theta);
+    
+    // Rotate by inclination to create 3D orbit around Earth
+    const x = xOrbit * Math.cos(lonR) - yOrbit * Math.sin(lonR) * Math.cos(inclination);
+    const y = yOrbit * Math.sin(inclination);
+    const z = xOrbit * Math.sin(lonR) + yOrbit * Math.cos(lonR) * Math.cos(inclination);
+    
     points.push(new THREE.Vector3(x, y, z));
   }
   return points;
@@ -75,22 +88,7 @@ function AnimatedDebris({ debris, progress, showTrail = true }) {
 const sunDirection = new THREE.Vector3(-2, 0.5, 1.5);
 
 // Earth component
-function Earth() {
-  const ref = useRef();
-  useFrame(() => {
-    if (ref.current) ref.current.rotation.y += 0.001;
-  });
-  const axialTilt = 23.4 * Math.PI / 180;
-  return (
-    <group rotation-z={axialTilt}>
-      <mesh ref={ref}>
-        <icosahedronGeometry args={[2, 64]} />
-        <EarthMaterial sunDirection={sunDirection} />
-        <AtmosphereMesh />
-      </mesh>
-    </group>
-  );
-}
+// Use shared Earth component (real sidereal rotation)
 
 // Convert lat/lon/alt to 3D position
 function latLonAltToVector(lat, lon, altKm, earthRadiusScene = 2) {
@@ -607,20 +605,7 @@ function ManeuverPlannerPage() {
             </button>
           </div>
 
-          <div style={{ marginBottom: 10 }}>
-            <label style={{ fontSize: 11, color: '#9ca3af', display: 'block', marginBottom: 4 }}>
-              Speed: {speed.toFixed(1)}x
-            </label>
-            <input
-              type="range"
-              min="0.5"
-              max="3"
-              step="0.5"
-              value={speed}
-              onChange={(e) => setSpeed(parseFloat(e.target.value))}
-              style={{ width: '100%' }}
-            />
-          </div>
+          {/* Removed interactive speed slider — timeline speed still controlled by internal state */}
 
           <div>
             <label style={{ fontSize: 11, color: '#9ca3af', display: 'block', marginBottom: 4 }}>

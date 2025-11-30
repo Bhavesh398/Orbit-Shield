@@ -31,6 +31,9 @@ class Settings(BaseSettings):
     SUPABASE_URL: str = os.getenv("SUPABASE_URL", "")
     SUPABASE_KEY: str = os.getenv("SUPABASE_KEY", "")
     
+    # Google Gemini API
+    GEMINI_API_KEY: str = os.getenv("GEMINI_API_KEY", "")
+    
     # AI Model Settings
     COLLISION_THRESHOLD_KM: float = 10.0
     HIGH_RISK_THRESHOLD_KM: float = 5.0

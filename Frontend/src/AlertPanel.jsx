@@ -29,7 +29,7 @@ function AlertPanel({ analysis }) {
             {debris ? (
               <div className="detail-item">
                 <span className="detail-label">Debris:</span>
-                <span className="detail-value">{debris.deb_name || debris.name || debris.norad_id || debris.id}</span>
+                <span className="detail-value">{debris.deb_name || debris.name || debris.norad_id || debris.deb_id}</span>
               </div>
             ) : null}
             {nearest.distance_now_km != null ? (

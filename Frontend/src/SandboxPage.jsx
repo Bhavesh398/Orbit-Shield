@@ -3,26 +3,40 @@ import React from 'react';
 import { Canvas, useFrame } from "@react-three/fiber";
 import { OrbitControls, Line } from "@react-three/drei";
 import EarthMaterial from "./EarthMaterial";
+import Earth from "./Earth";
 import AtmosphereMesh from "./AtmosphereMesh";
+import Starfield from "./Starfield";
 import { analyzeSandbox } from './api/client';
 
 const sunDirection = new THREE.Vector3(-2, 0.5, 1.5);
 
-// Generate orbital trajectory
+// Generate proper 3D orbital trajectory around Earth
 function generateOrbitPath(lat, lon, alt, numPoints = 100) {
   const points = [];
+  const rEarthKm = 6371.0;
+  const earthRadiusScene = 2;
+  const scale = earthRadiusScene / rEarthKm;
+  const orbitRadius = (rEarthKm + alt) * scale;
+  
+  // Convert initial position to orbital plane
+  const latR = lat * Math.PI / 180;
+  const lonR = lon * Math.PI / 180;
+  
+  // Calculate orbital inclination (angle of orbit relative to equator)
+  const inclination = latR; // Orbit inclination matches initial latitude
+  
   for (let i = 0; i < numPoints; i++) {
-    const angle = (i / numPoints) * Math.PI * 2;
-    const adjustedLon = lon + (angle * 180 / Math.PI);
-    const rEarthKm = 6371.0;
-    const rKm = rEarthKm + alt;
-    const scale = 2 / rEarthKm;
-    const r = rKm * scale;
-    const latR = lat * Math.PI / 180;
-    const lonR = adjustedLon * Math.PI / 180;
-    const x = r * Math.cos(latR) * Math.cos(lonR);
-    const y = r * Math.sin(latR);
-    const z = r * Math.cos(latR) * Math.sin(lonR);
+    const theta = (i / numPoints) * Math.PI * 2; // Angle around orbit
+    
+    // Position in orbital plane (2D)
+    const xOrbit = orbitRadius * Math.cos(theta);
+    const yOrbit = orbitRadius * Math.sin(theta);
+    
+    // Rotate by inclination to create 3D orbit around Earth
+    const x = xOrbit * Math.cos(lonR) - yOrbit * Math.sin(lonR) * Math.cos(inclination);
+    const y = yOrbit * Math.sin(inclination);
+    const z = xOrbit * Math.sin(lonR) + yOrbit * Math.cos(lonR) * Math.cos(inclination);
+    
     points.push(new THREE.Vector3(x, y, z));
   }
   return points;
@@ -73,22 +87,7 @@ function AnimatedDebris({ debris, progress, showTrail = true }) {
   );
 }
 
-function Earth() {
-  const ref = React.useRef();
-  useFrame(() => {
-    ref.current.rotation.y += 0.001;
-  });
-  const axialTilt = 23.4 * Math.PI / 180;
-  return (
-    <group rotation-z={axialTilt}>
-      <mesh ref={ref}>
-        <icosahedronGeometry args={[2, 64]} />
-        <EarthMaterial sunDirection={sunDirection}/>
-        <AtmosphereMesh />
-      </mesh>
-    </group>
-  );
-}
+// Use shared Earth component (real sidereal rotation)
 
 function latLonAltToVector(lat, lon, altKm, earthRadiusScene = 2) {
   const rEarthKm = 6371.0;
@@ -131,11 +130,25 @@ function SandboxPage() {
   const satelliteId = urlParams.get('satellite');
   const debrisIds = urlParams.get('debris')?.split(',') || [];
 
-  const [satellite, setSatellite] = React.useState(null);
+  // Custom SAT-001 with full manual controls - no longer loading from selection
+  const [satellite] = React.useState({
+    id: 'SAT-001',
+    name: 'SAT-001',
+    norad_id: 'SAT-001'
+  });
   const [debrisList, setDebrisList] = React.useState([]);
-  const [altitude, setAltitude] = React.useState('');
-  const [latitude, setLatitude] = React.useState('');
-  const [longitude, setLongitude] = React.useState('');
+  
+  // Full manual control parameters
+  const [altitude, setAltitude] = React.useState('550');
+  const [latitude, setLatitude] = React.useState('28.5');
+  const [longitude, setLongitude] = React.useState('45');
+  const [satX, setSatX] = React.useState('3000');
+  const [satY, setSatY] = React.useState('2000');
+  const [satZ, setSatZ] = React.useState('4000');
+  const [satVx, setSatVx] = React.useState('7.5');
+  const [satVy, setSatVy] = React.useState('0');
+  const [satVz, setSatVz] = React.useState('0');
+  
   const [analysis, setAnalysis] = React.useState(null);
   const [loading, setLoading] = React.useState(false);
   
@@ -145,20 +158,9 @@ function SandboxPage() {
   const [speed, setSpeed] = React.useState(1);
   const [showTrails, setShowTrails] = React.useState(true);
 
-  // Load satellite and debris from main app state or URL params
+  // Load debris from storage if available
   React.useEffect(() => {
-    // Try to get from sessionStorage (set by main app when clicking "Open Sandbox")
-    const storedSat = sessionStorage.getItem('sandboxSatellite');
     const storedDebris = sessionStorage.getItem('sandboxDebris');
-    
-    if (storedSat) {
-      const sat = JSON.parse(storedSat);
-      setSatellite(sat);
-      setAltitude(String(sat.altitude_km || ''));
-      setLatitude(String(sat.latitude || ''));
-      setLongitude(String(sat.longitude || ''));
-    }
-    
     if (storedDebris) {
       setDebrisList(JSON.parse(storedDebris));
     }
@@ -178,24 +180,33 @@ function SandboxPage() {
     return () => clearInterval(interval);
   }, [isPlaying, speed]);
   
-  // Generate satellite trajectory
+  // Define display values FIRST before using them
+  const displayAlt = altitude !== '' ? parseFloat(altitude) : satellite?.altitude_km;
+  const displayLat = latitude !== '' ? parseFloat(latitude) : satellite?.latitude;
+  const displayLon = longitude !== '' ? parseFloat(longitude) : satellite?.longitude;
+  
+  // Generate satellite trajectory (now displayLat/displayLon/displayAlt are defined)
   const satTrajectory = React.useMemo(() => {
     if (!displayLat || !displayLon) return [];
     return generateOrbitPath(displayLat, displayLon, displayAlt || 500);
   }, [displayLat, displayLon, displayAlt]);
 
-  const displayAlt = altitude !== '' ? parseFloat(altitude) : satellite?.altitude_km;
-  const displayLat = latitude !== '' ? parseFloat(latitude) : satellite?.latitude;
-  const displayLon = longitude !== '' ? parseFloat(longitude) : satellite?.longitude;
-
   async function runSimulation() {
     if (!satellite) return;
     setLoading(true);
     try {
-      const alt = altitude !== '' ? parseFloat(altitude) : undefined;
-      const lat = latitude !== '' ? parseFloat(latitude) : undefined;
-      const lon = longitude !== '' ? parseFloat(longitude) : undefined;
-      const result = await analyzeSandbox(satellite.id, { altitude_km: alt, latitude: lat, longitude: lon });
+      const params = {
+        altitude_km: parseFloat(altitude) || 550,
+        latitude: parseFloat(latitude) || 0,
+        longitude: parseFloat(longitude) || 0,
+        sat_x: parseFloat(satX) || 0,
+        sat_y: parseFloat(satY) || 0,
+        sat_z: parseFloat(satZ) || 0,
+        sat_vx: parseFloat(satVx) || 0,
+        sat_vy: parseFloat(satVy) || 0,
+        sat_vz: parseFloat(satVz) || 0
+      };
+      const result = await analyzeSandbox(satellite.id, params);
       setAnalysis(result);
     } catch (e) {
       console.error('Sandbox analysis failed', e);
@@ -203,18 +214,6 @@ function SandboxPage() {
     } finally {
       setLoading(false);
     }
-  }
-
-  if (!satellite) {
-    return (
-      <div style={{ padding: 20, color: '#fff', background: '#0a0f1a', minHeight: '100vh' }}>
-        <h2>Sandbox Simulation</h2>
-        <p>No satellite loaded. Please select a satellite from the main dashboard and click "Open Sandbox".</p>
-        <button onClick={() => window.location.href = '/dashboard'} style={{ padding: '10px 18px', marginTop: 10, border: 'none', borderRadius: 8, cursor: 'pointer', color: '#fff', background: 'linear-gradient(135deg, #3ABEFF, #7B61FF)', boxShadow: '0 0 20px rgba(58,190,255,0.3)' }}>
-          Back to Dashboard
-        </button>
-      </div>
-    );
   }
 
   const riskProb = analysis?.nearest?.[0]?.model1_risk?.probability;
@@ -258,85 +257,211 @@ function SandboxPage() {
         </div>
 
         <div style={{ marginBottom: 20 }}>
-          <h3 style={{ fontSize: 13, marginBottom: 10, color: '#3ABEFF', letterSpacing: '1px' }}>Adjust Parameters</h3>
+          <h3 style={{ fontSize: 13, marginBottom: 10, color: '#3ABEFF', letterSpacing: '1px' }}>Orbital Parameters</h3>
           
-          <label style={{ display: 'block', fontSize: 12, marginBottom: 5 }}>
+          <label style={{ display: 'block', fontSize: 11, marginBottom: 8 }}>
             Altitude (km):
             <input 
               type="number" 
               value={altitude} 
               onChange={e => setAltitude(e.target.value)}
-              placeholder={satellite.altitude_km}
               style={{ 
                 width: '100%', 
-                padding: 8, 
-                marginTop: 6, 
+                padding: 6, 
+                marginTop: 4, 
                 background: '#0f172a', 
                 border: '1px solid rgba(58,190,255,0.2)', 
                 borderRadius: 6,
-                color: '#fff' 
+                color: '#fff',
+                fontSize: 11
               }}
             />
           </label>
 
-          <label style={{ display: 'block', fontSize: 12, marginBottom: 5 }}>
+          <label style={{ display: 'block', fontSize: 11, marginBottom: 8 }}>
             Latitude (deg):
             <input 
               type="number" 
               value={latitude} 
               onChange={e => setLatitude(e.target.value)}
-              placeholder={satellite.latitude}
               step="0.1"
               style={{ 
                 width: '100%', 
-                padding: 8, 
-                marginTop: 6, 
+                padding: 6, 
+                marginTop: 4, 
                 background: '#0f172a', 
                 border: '1px solid rgba(58,190,255,0.2)', 
                 borderRadius: 6,
-                color: '#fff' 
+                color: '#fff',
+                fontSize: 11
               }}
             />
           </label>
 
-          <label style={{ display: 'block', fontSize: 12, marginBottom: 10 }}>
+          <label style={{ display: 'block', fontSize: 11, marginBottom: 8 }}>
             Longitude (deg):
             <input 
               type="number" 
               value={longitude} 
               onChange={e => setLongitude(e.target.value)}
-              placeholder={satellite.longitude}
               step="0.1"
               style={{ 
                 width: '100%', 
-                padding: 8, 
-                marginTop: 6, 
+                padding: 6, 
+                marginTop: 4, 
                 background: '#0f172a', 
                 border: '1px solid rgba(58,190,255,0.2)', 
                 borderRadius: 6,
-                color: '#fff' 
+                color: '#fff',
+                fontSize: 11
+              }}
+            />
+          </label>
+        </div>
+
+        <div style={{ marginBottom: 20 }}>
+          <h3 style={{ fontSize: 13, marginBottom: 10, color: '#3ABEFF', letterSpacing: '1px' }}>Position (km)</h3>
+          
+          <label style={{ display: 'block', fontSize: 11, marginBottom: 8 }}>
+            X:
+            <input 
+              type="number" 
+              value={satX} 
+              onChange={e => setSatX(e.target.value)}
+              style={{ 
+                width: '100%', 
+                padding: 6, 
+                marginTop: 4, 
+                background: '#0f172a', 
+                border: '1px solid rgba(58,190,255,0.2)', 
+                borderRadius: 6,
+                color: '#fff',
+                fontSize: 11
               }}
             />
           </label>
 
-          <button 
-            onClick={runSimulation} 
-            disabled={loading}
-            style={{ 
-              width: '100%', 
-              padding: 12, 
-              background: loading ? '#4b5563' : 'linear-gradient(135deg, #3ABEFF, #7B61FF)', 
-              color: '#fff', 
-              border: 'none', 
-              cursor: loading ? 'not-allowed' : 'pointer',
-              borderRadius: 10,
-              fontWeight: 700,
-              boxShadow: '0 0 24px rgba(58,190,255,0.4)'
-            }}
-          >
-            {loading ? 'Running Simulation...' : 'Run Simulation'}
-          </button>
+          <label style={{ display: 'block', fontSize: 11, marginBottom: 8 }}>
+            Y:
+            <input 
+              type="number" 
+              value={satY} 
+              onChange={e => setSatY(e.target.value)}
+              style={{ 
+                width: '100%', 
+                padding: 6, 
+                marginTop: 4, 
+                background: '#0f172a', 
+                border: '1px solid rgba(58,190,255,0.2)', 
+                borderRadius: 6,
+                color: '#fff',
+                fontSize: 11
+              }}
+            />
+          </label>
+
+          <label style={{ display: 'block', fontSize: 11, marginBottom: 8 }}>
+            Z:
+            <input 
+              type="number" 
+              value={satZ} 
+              onChange={e => setSatZ(e.target.value)}
+              style={{ 
+                width: '100%', 
+                padding: 6, 
+                marginTop: 4, 
+                background: '#0f172a', 
+                border: '1px solid rgba(58,190,255,0.2)', 
+                borderRadius: 6,
+                color: '#fff',
+                fontSize: 11
+              }}
+            />
+          </label>
         </div>
+
+        <div style={{ marginBottom: 20 }}>
+          <h3 style={{ fontSize: 13, marginBottom: 10, color: '#3ABEFF', letterSpacing: '1px' }}>Velocity (km/s)</h3>
+          
+          <label style={{ display: 'block', fontSize: 11, marginBottom: 8 }}>
+            Vx:
+            <input 
+              type="number" 
+              value={satVx} 
+              onChange={e => setSatVx(e.target.value)}
+              step="0.1"
+              style={{ 
+                width: '100%', 
+                padding: 6, 
+                marginTop: 4, 
+                background: '#0f172a', 
+                border: '1px solid rgba(58,190,255,0.2)', 
+                borderRadius: 6,
+                color: '#fff',
+                fontSize: 11
+              }}
+            />
+          </label>
+
+          <label style={{ display: 'block', fontSize: 11, marginBottom: 8 }}>
+            Vy:
+            <input 
+              type="number" 
+              value={satVy} 
+              onChange={e => setSatVy(e.target.value)}
+              step="0.1"
+              style={{ 
+                width: '100%', 
+                padding: 6, 
+                marginTop: 4, 
+                background: '#0f172a', 
+                border: '1px solid rgba(58,190,255,0.2)', 
+                borderRadius: 6,
+                color: '#fff',
+                fontSize: 11
+              }}
+            />
+          </label>
+
+          <label style={{ display: 'block', fontSize: 11, marginBottom: 10 }}>
+            Vz:
+            <input 
+              type="number" 
+              value={satVz} 
+              onChange={e => setSatVz(e.target.value)}
+              step="0.1"
+              style={{ 
+                width: '100%', 
+                padding: 6, 
+                marginTop: 4, 
+                background: '#0f172a', 
+                border: '1px solid rgba(58,190,255,0.2)', 
+                borderRadius: 6,
+                color: '#fff',
+                fontSize: 11
+              }}
+            />
+          </label>
+        </div>
+
+        <button 
+          onClick={runSimulation} 
+          disabled={loading}
+          style={{ 
+            width: '100%', 
+            padding: 12, 
+            background: loading ? '#4b5563' : 'linear-gradient(135deg, #3ABEFF, #7B61FF)', 
+            color: '#fff', 
+            border: 'none', 
+            cursor: loading ? 'not-allowed' : 'pointer',
+            borderRadius: 10,
+            fontWeight: 700,
+            boxShadow: '0 0 24px rgba(58,190,255,0.4)',
+            marginBottom: 15
+          }}
+        >
+          {loading ? 'Running Simulation...' : 'Run Simulation'}
+        </button>
 
         {analysis && (
           <div style={{ padding: 12, background: '#0b0d12', borderRadius: 8, marginBottom: 20, border: '1px solid rgba(58,190,255,0.2)' }}>
@@ -420,20 +545,7 @@ function SandboxPage() {
             </button>
           </div>
 
-          <div style={{ marginBottom: 10 }}>
-            <label style={{ fontSize: 11, color: '#9ca3af', display: 'block', marginBottom: 4 }}>
-              Speed: {speed.toFixed(1)}x
-            </label>
-            <input
-              type="range"
-              min="0.5"
-              max="3"
-              step="0.5"
-              value={speed}
-              onChange={(e) => setSpeed(parseFloat(e.target.value))}
-              style={{ width: '100%' }}
-            />
-          </div>
+          {/* Removed interactive speed slider — Earth now rotates at real-world rate */}
 
           <div style={{ marginBottom: 10 }}>
             <label style={{ fontSize: 11, color: '#9ca3af', display: 'block', marginBottom: 4 }}>
@@ -462,9 +574,20 @@ function SandboxPage() {
       </div>
 
       {/* 3D Canvas */}
-      <div style={{ flex: 1 }}>
-        <Canvas camera={{ position: [0, 0.1, 5] }} gl={{ toneMapping: THREE.NoToneMapping }}>
+      <div style={{ flex: 1, background: '#000' }}>
+        <Canvas 
+          camera={{ position: [0, 0.1, 5] }} 
+          gl={{ 
+            toneMapping: THREE.NoToneMapping,
+            antialias: true 
+          }}
+          style={{ background: '#000' }}
+        >
           <Earth />
+          
+          {/* Background Starfield */}
+          <Starfield />
+          <Starfield />
           
           {/* Animated Satellite */}
           {satTrajectory.length > 0 && (
@@ -499,6 +622,7 @@ function SandboxPage() {
           )}
 
           <ambientLight intensity={1.5} />
+          <directionalLight position={sunDirection} intensity={1.0} />
           <OrbitControls 
             enablePan={false}
             minDistance={3}
