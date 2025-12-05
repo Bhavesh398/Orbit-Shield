@@ -1,5 +1,8 @@
 // Frontend API client for Orbit Shield
-const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:8000/api';
+// Prefer explicit backend base URL when provided (production friendly)
+const BACKEND_BASE = import.meta.env.VITE_BACKEND_BASE_URL || null;
+// Remove trailing slash from BACKEND_BASE to avoid double slashes
+const API_BASE = BACKEND_BASE ? `${BACKEND_BASE.replace(/\/$/, '')}/api` : (import.meta.env.VITE_API_BASE || 'http://localhost:8000/api');
 
 async function apiGet(path) {
   const res = await fetch(`${API_BASE}${path}`);

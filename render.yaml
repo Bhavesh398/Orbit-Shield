@@ -1,0 +1,21 @@
+services:
+  - name: orbit-shield-backend
+    type: web
+    env: python
+    rootDir: Backend
+    buildCommand: ""
+    startCommand: "uvicorn main:app --host 0.0.0.0 --port $PORT --workers 2"
+    pythonVersion: "3.11.9"
+    autoDeploy: true
+    healthCheckPath: "/api/health"
+
+  - name: orbit-shield-frontend
+    type: web
+    env: node
+    rootDir: Frontend
+    buildCommand: "npm ci && npm run build"
+    startCommand: "npm run preview"
+    autoDeploy: true
+    envVars:
+      - key: VITE_BACKEND_BASE_URL
+        sync: false

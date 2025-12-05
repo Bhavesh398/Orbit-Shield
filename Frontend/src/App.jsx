@@ -42,11 +42,21 @@ function App() {
       wsRef.current = null;
     }
     // Robust WebSocket URL construction:
-    // Prefer explicit backend WS base via env, else derive from current host replacing Vite dev port with backend port 8000.
-    const backendPort = import.meta.env.VITE_BACKEND_PORT || '8000';
-    const protocol = window.location.protocol === 'https:' ? 'wss://' : 'ws://';
-    const hostBase = window.location.hostname + ':' + backendPort;
-    const url = protocol + hostBase + '/api/ws/risks';
+    // Prefer explicit backend base via env, else derive from current host replacing Vite dev port with backend port 8000.
+    const backendBase = import.meta.env.VITE_BACKEND_BASE_URL || null;
+    let url;
+    if (backendBase) {
+      const isHttps = backendBase.startsWith('https://');
+      const wsProto = isHttps ? 'wss://' : 'ws://';
+      // Remove trailing slash and protocol to avoid double slashes
+      const noProto = backendBase.replace(/^https?:\/\//, '').replace(/\/$/, '');
+      url = wsProto + noProto + '/api/ws/risks';
+    } else {
+      const backendPort = import.meta.env.VITE_BACKEND_PORT || '8000';
+      const protocol = window.location.protocol === 'https:' ? 'wss://' : 'ws://';
+      const hostBase = window.location.hostname + ':' + backendPort;
+      url = protocol + hostBase + '/api/ws/risks';
+    }
     console.log('Connecting Risk WebSocket ->', url);
     try {
       const ws = new WebSocket(url);
